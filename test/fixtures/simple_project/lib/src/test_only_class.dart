@@ -1,0 +1,3 @@
+class TestOnlyClass {
+  void testHelper() {}
+}
