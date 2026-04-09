@@ -4,8 +4,9 @@ import 'package:args/command_runner.dart';
 import 'package:path/path.dart' as p;
 
 import '../analyzer/project_analyzer.dart';
-import '../reporter/console_reporter.dart';
+import '../models/declaration.dart';
 import '../reporter/json_reporter.dart';
+import 'progress.dart';
 
 /// The main analyze command
 class AnalyzeCommand extends Command<int> {
@@ -34,6 +35,16 @@ class AnalyzeCommand extends Command<int> {
         abbr: 'v',
         defaultsTo: false,
         help: 'Show detailed analysis information',
+      )
+      ..addFlag(
+        'no-color',
+        defaultsTo: false,
+        help: 'Disable colored output',
+      )
+      ..addFlag(
+        'no-spinner',
+        defaultsTo: false,
+        help: 'Disable spinner animation',
       );
   }
 
@@ -58,46 +69,154 @@ class AnalyzeCommand extends Command<int> {
 
     final format = argResults!['format'] as String;
     final exclude = argResults!['exclude'] as List<String>;
-    final verbose = argResults!['verbose'] as bool;
+    final noColor = argResults!['no-color'] as bool;
+    final noSpinner = argResults!['no-spinner'] as bool;
+
+    // Use JSON format silently
+    if (format == 'json') {
+      return _runJsonAnalysis(absolutePath, exclude);
+    }
+
+    // Use fancy console output
+    return _runConsoleAnalysis(
+      absolutePath,
+      exclude,
+      useColors: !noColor,
+      useSpinner: !noSpinner,
+    );
+  }
+
+  Future<int> _runJsonAnalysis(String absolutePath, List<String> exclude) async {
+    try {
+      final analyzer = ProjectAnalyzer(
+        projectPath: absolutePath,
+        excludePatterns: exclude,
+      );
+
+      final result = await analyzer.analyze();
+      JsonReporter(projectRoot: absolutePath).report(result);
+
+      return result.completelyUnused.isEmpty ? 0 : 1;
+    } catch (e) {
+      stderr.writeln('{"error": "${e.toString().replaceAll('"', '\\"')}"}');
+      return 1;
+    }
+  }
+
+  Future<int> _runConsoleAnalysis(
+    String absolutePath,
+    List<String> exclude, {
+    required bool useColors,
+    required bool useSpinner,
+  }) async {
+    final progress = ProgressReporter(
+      useColors: useColors,
+      useSpinner: useSpinner,
+    );
+
+    final relativePath = p.relative(absolutePath, from: Directory.current.path);
+    final displayPath = relativePath.isEmpty || relativePath == '.'
+        ? p.basename(absolutePath)
+        : relativePath;
+
+    progress.start(displayPath);
+
+    AnalysisPhase? currentPhase;
 
     try {
       final analyzer = ProjectAnalyzer(
         projectPath: absolutePath,
         excludePatterns: exclude,
-        verbose: verbose,
-      );
+        onProgress: (progressInfo) {
+          if (progressInfo.phase != currentPhase) {
+            // Complete previous phase
+            if (currentPhase != null && currentPhase != AnalysisPhase.complete) {
+              progress.completePhase();
+            }
 
-      if (verbose) {
-        stderr.writeln('Analyzing project: $absolutePath');
-      }
+            currentPhase = progressInfo.phase;
+
+            // Start new phase
+            if (progressInfo.phase != AnalysisPhase.complete) {
+              final progressPhase = switch (progressInfo.phase) {
+                AnalysisPhase.discovery => ProgressPhase.discovery,
+                AnalysisPhase.parsing => ProgressPhase.parsing,
+                AnalysisPhase.exportGraph => ProgressPhase.exportGraph,
+                AnalysisPhase.usageGraph => ProgressPhase.usageGraph,
+                AnalysisPhase.findingUnused => ProgressPhase.analysis,
+                AnalysisPhase.complete => ProgressPhase.analysis,
+              };
+              progress.startPhase(
+                progressPhase,
+                totalFiles: progressInfo.totalFiles,
+              );
+            }
+          } else if (progressInfo.currentFile != null) {
+            progress.updateFileProgress(
+              progressInfo.currentFile!,
+              total: progressInfo.totalFiles,
+            );
+          }
+        },
+      );
 
       final result = await analyzer.analyze();
 
-      // Print warnings
+      // Complete the last phase
+      progress.completePhase();
+
+      // Show warnings
       for (final warning in result.warnings) {
-        stderr.writeln('Warning: $warning');
+        progress.warning(warning.toString());
       }
 
-      // Report results
-      switch (format) {
-        case 'json':
-          JsonReporter(projectRoot: absolutePath).report(result);
-        case 'console':
-        default:
-          ConsoleReporter(
-            verbose: verbose,
-            projectRoot: absolutePath,
-          ).report(result);
-      }
+      // Show results
+      progress.showResults(
+        totalFiles: result.stats.totalFiles,
+        totalDeclarations: result.stats.totalDeclarations,
+        publicExports: result.stats.publicDeclarations,
+        unusedExports: result.stats.unusedExports,
+        usedOnlyInTests: result.stats.usedOnlyInTests,
+        unused: result.completelyUnused
+            .map((e) => UnusedExportInfo(
+                  filePath: p.relative(e.declaration.filePath, from: absolutePath),
+                  name: e.declaration.name,
+                  type: _typeToString(e.declaration.type),
+                ))
+            .toList(),
+        testOnly: result.usedOnlyInTests
+            .map((e) => UnusedExportInfo(
+                  filePath: p.relative(e.declaration.filePath, from: absolutePath),
+                  name: e.declaration.name,
+                  type: _typeToString(e.declaration.type),
+                ))
+            .toList(),
+      );
 
-      // Return non-zero if there are unused exports
+      stdout.writeln();
+
       return result.completelyUnused.isEmpty ? 0 : 1;
     } catch (e, stackTrace) {
+      progress.completePhase(success: false);
+      stderr.writeln();
       stderr.writeln('Error: $e');
-      if (verbose) {
+      if (argResults!['verbose'] as bool) {
         stderr.writeln(stackTrace);
       }
       return 1;
     }
+  }
+
+  String _typeToString(DeclarationType type) {
+    return switch (type) {
+      DeclarationType.classDeclaration => 'class',
+      DeclarationType.functionDeclaration => 'function',
+      DeclarationType.topLevelVariable => 'variable',
+      DeclarationType.typedef => 'typedef',
+      DeclarationType.enumDeclaration => 'enum',
+      DeclarationType.extension => 'extension',
+      DeclarationType.extensionType => 'extension type',
+      DeclarationType.mixin => 'mixin',
+    };
   }
 }

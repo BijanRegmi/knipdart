@@ -15,11 +15,40 @@ import '../models/declaration.dart';
 import '../resolver/path_resolver.dart';
 import 'file_parser.dart';
 
+/// Progress callback for analysis phases
+typedef ProgressCallback = void Function(AnalysisProgress progress);
+
+/// Analysis progress information
+class AnalysisProgress {
+  final AnalysisPhase phase;
+  final int? currentFile;
+  final int? totalFiles;
+  final String? message;
+
+  const AnalysisProgress({
+    required this.phase,
+    this.currentFile,
+    this.totalFiles,
+    this.message,
+  });
+}
+
+/// Analysis phases
+enum AnalysisPhase {
+  discovery,
+  parsing,
+  exportGraph,
+  usageGraph,
+  findingUnused,
+  complete,
+}
+
 /// Main analyzer that orchestrates the analysis
 class ProjectAnalyzer {
   final String projectPath;
   final List<String> excludePatterns;
   final bool verbose;
+  final ProgressCallback? onProgress;
 
   late final String _packageName;
   late final PathResolver _pathResolver;
@@ -34,27 +63,43 @@ class ProjectAnalyzer {
     required this.projectPath,
     this.excludePatterns = const [],
     this.verbose = false,
+    this.onProgress,
   });
+
+  void _reportProgress(AnalysisPhase phase, {int? current, int? total, String? message}) {
+    onProgress?.call(AnalysisProgress(
+      phase: phase,
+      currentFile: current,
+      totalFiles: total,
+      message: message,
+    ));
+  }
 
   /// Run the full analysis
   Future<AnalysisResult> analyze() async {
     final stopwatch = Stopwatch()..start();
 
     // Phase 1: Project Discovery
+    _reportProgress(AnalysisPhase.discovery);
     await _discoverProject();
 
     // Phase 2: Parse all files
+    _reportProgress(AnalysisPhase.parsing);
     await _parseAllFiles();
 
     // Phase 3: Build export graph (identify public API)
+    _reportProgress(AnalysisPhase.exportGraph);
     _buildExportGraph();
 
     // Phase 4: Build usage graph
+    _reportProgress(AnalysisPhase.usageGraph);
     _buildUsageGraph();
 
     // Phase 5: Identify unused exports
+    _reportProgress(AnalysisPhase.findingUnused);
     final unusedExports = _findUnusedExports();
 
+    _reportProgress(AnalysisPhase.complete);
     stopwatch.stop();
 
     final stats = AnalysisStats(
@@ -99,8 +144,13 @@ class ProjectAnalyzer {
   /// Phase 2: Parse all Dart files
   Future<void> _parseAllFiles() async {
     final dartFiles = await _findDartFiles();
+    final total = dartFiles.length;
+    var current = 0;
 
     for (final filePath in dartFiles) {
+      current++;
+      _reportProgress(AnalysisPhase.parsing, current: current, total: total);
+
       if (_shouldExclude(filePath)) continue;
 
       try {
