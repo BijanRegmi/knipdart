@@ -1,0 +1,6 @@
+# Test configuration
+# Exclude fixture directories from test discovery
+
+paths:
+  - test/analyzer/
+  - test/integration/

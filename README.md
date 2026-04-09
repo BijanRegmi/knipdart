@@ -1,5 +1,8 @@
 # KnipDart
 
+[![CI](https://github.com/BijanRegmi/knipdart/actions/workflows/ci.yml/badge.svg)](https://github.com/BijanRegmi/knipdart/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Find unused exports in Dart/Flutter projects.
 
 Inspired by [knip.dev](https://knip.dev) for JavaScript/TypeScript.
@@ -11,21 +14,37 @@ Inspired by [knip.dev](https://knip.dev) for JavaScript/TypeScript.
 - **Identifies test-only exports** - Exports used only in test files (separate category)
 - **Handles barrel files** - Correctly traces re-exports through barrel files
 - **Respects combinators** - Handles `show` and `hide` in exports
-- **Multiple output formats** - Console and JSON
+- **Multiple output formats** - Console (with colors & spinners) and JSON
+- **Cross-platform** - Works on Linux, macOS, and Windows
 
 ## Installation
 
+### From GitHub
+
 ```bash
+# Install globally
+dart pub global activate --source git https://github.com/BijanRegmi/knipdart
+
+# Or add to dev_dependencies
+# pubspec.yaml
+dev_dependencies:
+  knipdart:
+    git:
+      url: https://github.com/BijanRegmi/knipdart
+      ref: v0.1.0
+```
+
+### From source
+
+```bash
+git clone https://github.com/BijanRegmi/knipdart
+cd knipdart
 dart pub global activate --source path .
 ```
 
-Or add to your `dev_dependencies`:
+### Download binary
 
-```yaml
-dev_dependencies:
-  knipdart:
-    path: ../knipdart
-```
+Pre-built executables are available on the [Releases](https://github.com/BijanRegmi/knipdart/releases) page.
 
 ## Usage
 
@@ -36,7 +55,7 @@ knipdart analyze
 # Analyze specific path
 knipdart analyze /path/to/project
 
-# JSON output
+# JSON output (for CI)
 knipdart analyze --format=json
 
 # Verbose output (shows export paths)
@@ -44,33 +63,73 @@ knipdart analyze --verbose
 
 # Exclude patterns
 knipdart analyze --exclude="**/*.g.dart" --exclude="**/*.freezed.dart"
+
+# Disable colors/spinner (for CI)
+knipdart analyze --no-color --no-spinner
 ```
 
 ## Example Output
 
 ```
-Unused exports (3):
+  KNIPDART  Unused Export Analyzer
 
-lib/src/utils/string_helpers.dart
-  ├── capitalize (function)
-  └── truncateWithEllipsis (function)
+  Analyzing my_project
 
-lib/src/models/legacy_user.dart
-  └── LegacyUser (class)
+  ✓ 📁 Discovering project structure (25ms)
+  ✓ 📄 Parsing Dart files (230ms)
+  ✓ 🔗 Building export graph (5ms)
+  ✓ 🔍 Analyzing symbol usage (45ms)
+  ✓ ⚡ Finding unused exports (2ms)
 
-Used only in tests (1):
+  ✗ Unused Exports (3)
 
-lib/src/testing/mock_helpers.dart
-  └── MockHelper (class)
+    lib/src/utils/string_helpers.dart
+    ├── capitalize (function)
+    └── truncateWithEllipsis (function)
 
-Summary:
-  Total files: 47
-  Total declarations: 234
-  Public exports: 89
-  Unused exports: 3
-  Used only in tests: 1
+    lib/src/models/legacy_user.dart
+    └── LegacyUser (class)
 
-Analysis completed in 245ms
+  ⚠ Used Only in Tests (1)
+
+    lib/src/testing/mock_helpers.dart
+    └── MockHelper (class)
+
+  ┌─────────────────────────────────────┐
+  │           Summary                   │
+  ├─────────────────────────────────────┤
+  │  Files analyzed    47               │
+  │  Total declarations234              │
+  │  Public exports    89               │
+  │  Unused exports    3 (3.4%)         │
+  │  Test-only         1                │
+  ├─────────────────────────────────────┤
+  │  Time              312ms            │
+  └─────────────────────────────────────┘
+```
+
+## CI Integration
+
+Add to your GitHub Actions workflow:
+
+```yaml
+- name: Check for unused exports
+  run: |
+    dart pub global activate --source git https://github.com/BijanRegmi/knipdart
+    knipdart analyze --no-spinner --no-color
+```
+
+Or use JSON output for parsing:
+
+```yaml
+- name: Check for unused exports
+  run: |
+    dart pub global activate --source git https://github.com/BijanRegmi/knipdart
+    knipdart analyze --format=json > unused-exports.json
+    if [ $(jq '.stats.unusedExports' unused-exports.json) -gt 0 ]; then
+      echo "Found unused exports!"
+      exit 1
+    fi
 ```
 
 ## How It Works
@@ -108,6 +167,33 @@ void main() async {
   }
 }
 ```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Run tests (`dart test`)
+4. Run the analyzer on itself (`dart run bin/knipdart.dart analyze .`)
+5. Commit your changes (`git commit -m 'Add some amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
+
+## Releasing
+
+Releases are automated via GitHub Actions:
+
+1. Update version in `pubspec.yaml`
+2. Update `CHANGELOG.md` with the new version
+3. Commit: `git commit -am "Release v0.x.0"`
+4. Tag: `git tag v0.x.0`
+5. Push: `git push && git push --tags`
+
+The release workflow will automatically:
+- Run tests
+- Create a GitHub release with changelog
+- Build and attach executables for Linux, macOS, and Windows
 
 ## License
 

@@ -97,7 +97,6 @@ class ProgressReporter {
 
   int _fileCount = 0;
   int _currentFile = 0;
-  String _lastOutput = '';
 
   ProgressReporter({
     this.useColors = true,
