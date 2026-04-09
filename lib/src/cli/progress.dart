@@ -71,6 +71,17 @@ enum ProgressPhase {
   analysis,
 }
 
+/// ANSI cursor control
+class Cursor {
+  static const hide = '\x1B[?25l';
+  static const show = '\x1B[?25h';
+  static const moveToStart = '\r';
+  static const clearLine = '\x1B[K';
+  static const clearToEnd = '\x1B[0K';
+  static const saveCursor = '\x1B[s';
+  static const restoreCursor = '\x1B[u';
+}
+
 /// Progress reporter with spinners and colors
 class ProgressReporter {
   final bool useColors;
@@ -86,6 +97,7 @@ class ProgressReporter {
 
   int _fileCount = 0;
   int _currentFile = 0;
+  String _lastOutput = '';
 
   ProgressReporter({
     this.useColors = true,
@@ -107,20 +119,18 @@ class ProgressReporter {
     return '${Colors.dim}$text${Colors.reset}';
   }
 
-  void _clearLine() {
-    if (useSpinner) {
-      stdout.write('\r\x1B[K');
-    }
-  }
-
   void _startSpinner(String message) {
     _currentMessage = message;
     _spinnerFrame = 0;
+    _lastOutput = '';
 
     if (!useSpinner) {
-      stdout.writeln(message);
+      stdout.writeln('  ... $message');
       return;
     }
+
+    // Hide cursor for smooth animation
+    stdout.write(Cursor.hide);
 
     _spinnerTimer?.cancel();
     _spinnerTimer = Timer.periodic(
@@ -131,17 +141,22 @@ class ProgressReporter {
   }
 
   void _updateSpinner() {
-    _clearLine();
     final frame = Symbols.spinnerFrames[_spinnerFrame % Symbols.spinnerFrames.length];
     final spinner = _color(frame, Colors.cyan);
 
     String progress = '';
     if (_fileCount > 0 && _currentFile > 0) {
-      final percent = ((_currentFile / _fileCount) * 100).toStringAsFixed(0);
-      progress = _dim(' [$_currentFile/$_fileCount] ${percent}%');
+      final percent = ((_currentFile / _fileCount) * 100).toStringAsFixed(0).padLeft(3);
+      final current = _currentFile.toString().padLeft(_fileCount.toString().length);
+      progress = _dim(' [$current/$_fileCount] $percent%');
     }
 
-    stdout.write('  $spinner $_currentMessage$progress');
+    // Build the full line with fixed width to prevent jumping
+    final content = '  $spinner $_currentMessage$progress';
+
+    // Move to start of line, clear to end, write content
+    stdout.write('\r\x1B[K$content');
+
     _spinnerFrame++;
   }
 
@@ -149,9 +164,9 @@ class ProgressReporter {
     _spinnerTimer?.cancel();
     _spinnerTimer = null;
 
-    if (useSpinner) {
-      _clearLine();
-    }
+    // Clear line and show cursor
+    stdout.write('\r\x1B[K');
+    stdout.write(Cursor.show);
 
     final icon = success
         ? _color(Symbols.checkMark, Colors.green)
@@ -241,11 +256,21 @@ class ProgressReporter {
 
   /// Show a warning
   void warning(String message) {
-    _clearLine();
+    // Stop spinner temporarily
+    _spinnerTimer?.cancel();
+    stdout.write('\r\x1B[K');
+    stdout.write(Cursor.show);
+
     final icon = _color(Symbols.warning, Colors.yellow);
     stdout.writeln('  $icon ${_color(message, Colors.yellow)}');
+
+    // Restart spinner if we're in a phase
     if (_currentPhase != null) {
-      _startSpinner('${_getPhaseIcon(_currentPhase!)} ${_getPhaseMessage(_currentPhase!)}');
+      stdout.write(Cursor.hide);
+      _spinnerTimer = Timer.periodic(
+        const Duration(milliseconds: 80),
+        (_) => _updateSpinner(),
+      );
     }
   }
 
