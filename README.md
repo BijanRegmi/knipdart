@@ -7,6 +7,9 @@ Find unused exports in Dart/Flutter projects.
 
 Inspired by [knip.dev](https://knip.dev) for JavaScript/TypeScript.
 
+> [!NOTE]
+> I needed this for a project and couldn't find a tool that worked, so I just had Claude Code build it for me. I didn't actually write any of this. Claude did all the work. Consider it an "exported" task that, unlike most, actually ended up being useful. Posting it here in case anyone else wants it.
+
 ## Features
 
 - **AST-based analysis** - Uses the Dart `analyzer` package for accurate detection
