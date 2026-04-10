@@ -121,7 +121,6 @@ class ProgressReporter {
   void _startSpinner(String message) {
     _currentMessage = message;
     _spinnerFrame = 0;
-    _lastOutput = '';
 
     if (!useSpinner) {
       stdout.writeln('  ... $message');

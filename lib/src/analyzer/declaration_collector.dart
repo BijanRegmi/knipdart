@@ -18,7 +18,7 @@ class DeclarationCollector extends RecursiveAstVisitor<void> {
       type: DeclarationType.classDeclaration,
       lineNumber: node.name.offset,
       column: 0,
-    ));
+    ),);
     // Don't visit children - we only want top-level declarations
   }
 
@@ -30,7 +30,7 @@ class DeclarationCollector extends RecursiveAstVisitor<void> {
       type: DeclarationType.mixin,
       lineNumber: node.name.offset,
       column: 0,
-    ));
+    ),);
   }
 
   @override
@@ -41,7 +41,7 @@ class DeclarationCollector extends RecursiveAstVisitor<void> {
       type: DeclarationType.enumDeclaration,
       lineNumber: node.name.offset,
       column: 0,
-    ));
+    ),);
   }
 
   @override
@@ -55,7 +55,7 @@ class DeclarationCollector extends RecursiveAstVisitor<void> {
         type: DeclarationType.extension,
         lineNumber: node.name!.offset,
         column: 0,
-      ));
+      ),);
     }
   }
 
@@ -67,7 +67,7 @@ class DeclarationCollector extends RecursiveAstVisitor<void> {
       type: DeclarationType.extensionType,
       lineNumber: node.name.offset,
       column: 0,
-    ));
+    ),);
   }
 
   @override
@@ -80,7 +80,7 @@ class DeclarationCollector extends RecursiveAstVisitor<void> {
         type: DeclarationType.functionDeclaration,
         lineNumber: node.name.offset,
         column: 0,
-      ));
+      ),);
     }
   }
 
@@ -93,7 +93,7 @@ class DeclarationCollector extends RecursiveAstVisitor<void> {
         type: DeclarationType.topLevelVariable,
         lineNumber: variable.name.offset,
         column: 0,
-      ));
+      ),);
     }
   }
 
@@ -105,7 +105,7 @@ class DeclarationCollector extends RecursiveAstVisitor<void> {
       type: DeclarationType.typedef,
       lineNumber: node.name.offset,
       column: 0,
-    ));
+    ),);
   }
 
   @override
@@ -116,6 +116,6 @@ class DeclarationCollector extends RecursiveAstVisitor<void> {
       type: DeclarationType.typedef,
       lineNumber: node.name.offset,
       column: 0,
-    ));
+    ),);
   }
 }

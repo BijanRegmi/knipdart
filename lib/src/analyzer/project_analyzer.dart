@@ -72,7 +72,7 @@ class ProjectAnalyzer {
       currentFile: current,
       totalFiles: total,
       message: message,
-    ));
+    ),);
   }
 
   /// Run the full analysis
@@ -434,13 +434,13 @@ class ProjectAnalyzer {
           declaration: declaration,
           exportedVia: _publicApi.getExportedVia(declarationId),
           category: UnusedCategory.usedOnlyInTests,
-        ));
+        ),);
       } else if (!_usageTracker.isUsed(declarationId)) {
         unused.add(UnusedExport(
           declaration: declaration,
           exportedVia: _publicApi.getExportedVia(declarationId),
           category: UnusedCategory.unused,
-        ));
+        ),);
       }
     }
 

@@ -182,14 +182,14 @@ class AnalyzeCommand extends Command<int> {
                   filePath: p.relative(e.declaration.filePath, from: absolutePath),
                   name: e.declaration.name,
                   type: _typeToString(e.declaration.type),
-                ))
+                ),)
             .toList(),
         testOnly: result.usedOnlyInTests
             .map((e) => UnusedExportInfo(
                   filePath: p.relative(e.declaration.filePath, from: absolutePath),
                   name: e.declaration.name,
                   type: _typeToString(e.declaration.type),
-                ))
+                ),)
             .toList(),
       );
 
