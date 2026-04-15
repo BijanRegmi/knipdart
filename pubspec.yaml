@@ -1,6 +1,6 @@
 name: knipdart
 description: Find unused exports in Dart/Flutter projects. AST-based static analysis tool inspired by knip.dev.
-version: 0.1.0
+version: 0.2.0
 repository: https://github.com/BijanRegmi/knipdart
 issue_tracker: https://github.com/BijanRegmi/knipdart/issues
 topics:
