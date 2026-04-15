@@ -91,6 +91,10 @@ class UsageScanner extends RecursiveAstVisitor<void> {
       // Parameter names
       return true;
     }
+    if (parent is ConstructorDeclaration) {
+      // Constructor names (e.g., Bar in "Bar(this.name)")
+      return true;
+    }
 
     return false;
   }
@@ -115,6 +119,16 @@ class UsageTracker {
   bool isUsed(String declarationId) {
     return _usages.containsKey(declarationId) &&
         _usages[declarationId]!.isNotEmpty;
+  }
+
+  /// Check if a declaration is used only within its own file
+  bool isUsedOnlyLocally(String declarationId) {
+    final usages = _usages[declarationId];
+    if (usages == null || usages.isEmpty) return false;
+
+    // Declaration ID format is "filePath#name"
+    final declarationFile = declarationId.split('#').first;
+    return usages.every((usageFile) => usageFile == declarationFile);
   }
 
   /// Check if a declaration is used only in test files

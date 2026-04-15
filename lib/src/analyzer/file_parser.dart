@@ -1,5 +1,5 @@
-import 'package:analyzer/dart/analysis/features.dart';
-import 'package:analyzer/dart/analysis/utilities.dart' as analyzer;
+import 'package:analyzer/dart/analysis/analysis_context_collection.dart';
+import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 
 import '../models/dart_file.dart';
@@ -11,15 +11,19 @@ import 'declaration_collector.dart';
 /// Parses a Dart file and extracts all metadata
 class FileParser {
   final PathResolver pathResolver;
+  final AnalysisContextCollection contextCollection;
 
-  FileParser(this.pathResolver);
+  FileParser(this.pathResolver, this.contextCollection);
 
   /// Parse a single Dart file
-  Future<DartFile> parseDartFile(String filePath) async {
-    final result = analyzer.parseFile(
-      path: filePath,
-      featureSet: FeatureSet.latestLanguageVersion(),
-    );
+  DartFile parseDartFile(String filePath) {
+    final context = contextCollection.contextFor(filePath);
+    final result = context.currentSession.getParsedUnit(filePath);
+
+    if (result is! ParsedUnitResult) {
+      throw Exception('Failed to parse $filePath');
+    }
+
     final unit = result.unit;
 
     final collector = DeclarationCollector(filePath);

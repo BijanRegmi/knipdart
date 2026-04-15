@@ -1,7 +1,7 @@
 import 'dart:io';
 
-import 'package:analyzer/dart/analysis/features.dart';
-import 'package:analyzer/dart/analysis/utilities.dart' as analyzer;
+import 'package:analyzer/dart/analysis/analysis_context_collection.dart';
+import 'package:analyzer/dart/analysis/results.dart' hide AnalysisResult;
 import 'package:glob/glob.dart';
 import 'package:glob/list_local_fs.dart';
 import 'package:path/path.dart' as p;
@@ -47,6 +47,7 @@ enum AnalysisPhase {
 class ProjectAnalyzer {
   final String projectPath;
   final List<String> excludePatterns;
+  final List<String> scopePaths;
   final bool verbose;
   final ProgressCallback? onProgress;
 
@@ -56,12 +57,14 @@ class ProjectAnalyzer {
   late final ProjectGraph _projectGraph;
   late final PublicApiTracker _publicApi;
   late final UsageTracker _usageTracker;
+  late final AnalysisContextCollection _contextCollection;
 
   final List<AnalysisWarning> _warnings = [];
 
   ProjectAnalyzer({
     required this.projectPath,
     this.excludePatterns = const [],
+    this.scopePaths = const [],
     this.verbose = false,
     this.onProgress,
   });
@@ -108,6 +111,9 @@ class ProjectAnalyzer {
       publicDeclarations: _publicApi.allPublicApiIds.length,
       unusedExports:
           unusedExports.where((e) => e.category == UnusedCategory.unused).length,
+      usedOnlyLocally: unusedExports
+          .where((e) => e.category == UnusedCategory.usedOnlyLocally)
+          .length,
       usedOnlyInTests: unusedExports
           .where((e) => e.category == UnusedCategory.usedOnlyInTests)
           .length,
@@ -131,11 +137,19 @@ class ProjectAnalyzer {
     final pubspec = loadYaml(pubspecFile.readAsStringSync()) as YamlMap;
     _packageName = pubspec['name'] as String;
 
+    final absoluteProjectRoot = p.normalize(p.absolute(projectPath));
+
     _pathResolver = PathResolver(
       packageName: _packageName,
-      projectRoot: p.normalize(p.absolute(projectPath)),
+      projectRoot: absoluteProjectRoot,
     );
-    _fileParser = FileParser(_pathResolver);
+
+    // Create analysis context that respects project's analysis_options.yaml
+    _contextCollection = AnalysisContextCollection(
+      includedPaths: [absoluteProjectRoot],
+    );
+
+    _fileParser = FileParser(_pathResolver, _contextCollection);
     _projectGraph = ProjectGraph();
     _publicApi = PublicApiTracker();
     _usageTracker = UsageTracker();
@@ -154,7 +168,7 @@ class ProjectAnalyzer {
       if (_shouldExclude(filePath)) continue;
 
       try {
-        final dartFile = await _fileParser.parseDartFile(filePath);
+        final dartFile = _fileParser.parseDartFile(filePath);
         _projectGraph.addFile(dartFile);
       } catch (e) {
         _warnings.add(AnalysisWarning('Failed to parse: $e', filePath));
@@ -166,10 +180,11 @@ class ProjectAnalyzer {
   Future<List<String>> _findDartFiles() async {
     final files = <String>[];
     final glob = Glob('**.dart');
+    final absoluteProjectPath = p.normalize(p.absolute(projectPath));
 
     // Search in lib/, bin/, test/
     for (final dir in ['lib', 'bin', 'test']) {
-      final dirPath = p.join(projectPath, dir);
+      final dirPath = p.join(absoluteProjectPath, dir);
       if (!Directory(dirPath).existsSync()) continue;
 
       await for (final entity in glob.list(root: dirPath)) {
@@ -215,6 +230,21 @@ class ProjectAnalyzer {
     }
   }
 
+  /// Check if a file is within the analysis scope
+  bool _isInScope(String filePath) {
+    if (scopePaths.isEmpty) return true;
+
+    final normalizedPath = p.normalize(p.absolute(filePath));
+    for (final scope in scopePaths) {
+      final normalizedScope = p.normalize(p.absolute(scope));
+      if (p.isWithin(normalizedScope, normalizedPath) ||
+          normalizedPath == normalizedScope) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// Process a public API file and its exports
   void _processPublicApiFile(DartFile file, String publicApiPath) {
     final visited = <String>{};
@@ -248,7 +278,14 @@ class ProjectAnalyzer {
       if (exportedFile == null) continue;
 
       // Apply show/hide combinators
-      final availableNames = exportedFile.publicDeclarationNames;
+      // Include part file declarations when computing available names
+      final availableNames = <String>{...exportedFile.publicDeclarationNames};
+      for (final partPath in exportedFile.parts) {
+        final partFile = _projectGraph.getFile(partPath);
+        if (partFile != null) {
+          availableNames.addAll(partFile.publicDeclarationNames);
+        }
+      }
       var exportedNames = export.getExportedNames(availableNames);
 
       // If we have allowedNames from parent, intersect with that
@@ -289,11 +326,15 @@ class ProjectAnalyzer {
 
   /// Analyze symbol usage within a file
   void _analyzeFileUsage(DartFile file) {
-    // Parse the file again to scan for usage
-    final result = analyzer.parseFile(
-      path: file.path,
-      featureSet: FeatureSet.latestLanguageVersion(),
-    );
+    // Parse the file using the project's analysis context
+    final context = _contextCollection.contextFor(file.path);
+    final result = context.currentSession.getParsedUnit(file.path);
+
+    if (result is! ParsedUnitResult) {
+      _warnings.add(AnalysisWarning('Failed to parse for usage', file.path));
+      return;
+    }
+
     final scanner = UsageScanner();
     result.unit.visitChildren(scanner);
 
@@ -329,7 +370,7 @@ class ProjectAnalyzer {
       }
     }
 
-    // Match usage to declarations
+    // Match usage to declarations from imports
     for (final name in scanner.usedIdentifiers) {
       final decls = importedNames[name];
       if (decls != null) {
@@ -353,6 +394,44 @@ class ProjectAnalyzer {
           for (final decl in decls) {
             _usageTracker.recordUsage(decl.id, file.path);
           }
+        }
+      }
+    }
+
+    // Track self-file/library usage (declarations used within the same file or library)
+    // Collect all declarations in this library (file + its part files)
+    final libraryDeclarations = <Declaration>[...file.declarations];
+    for (final partPath in file.parts) {
+      final partFile = _projectGraph.getFile(partPath);
+      if (partFile != null) {
+        libraryDeclarations.addAll(partFile.declarations);
+      }
+    }
+
+    // If this is a part file, also include the parent library's declarations
+    if (file.isPartFile && file.partOf != null) {
+      final parentFile = _projectGraph.getFile(file.partOf!);
+      if (parentFile != null) {
+        libraryDeclarations.addAll(parentFile.declarations);
+        // And other parts of the same library
+        for (final partPath in parentFile.parts) {
+          if (partPath != file.path) {
+            final siblingPart = _projectGraph.getFile(partPath);
+            if (siblingPart != null) {
+              libraryDeclarations.addAll(siblingPart.declarations);
+            }
+          }
+        }
+      }
+    }
+
+    // Track usage against all declarations in the library
+    // For same-library usage, record using the declaration's own file path
+    // This ensures "used only locally" works correctly for part files
+    for (final name in scanner.usedIdentifiers) {
+      for (final decl in libraryDeclarations) {
+        if (decl.name == name) {
+          _usageTracker.recordUsage(decl.id, decl.filePath);
         }
       }
     }
@@ -412,6 +491,9 @@ class ProjectAnalyzer {
       final filePath = parts[0];
       final name = parts[1];
 
+      // Skip if not in scope
+      if (!_isInScope(filePath)) continue;
+
       final file = _projectGraph.getFile(filePath);
       if (file == null) continue;
 
@@ -434,6 +516,12 @@ class ProjectAnalyzer {
           declaration: declaration,
           exportedVia: _publicApi.getExportedVia(declarationId),
           category: UnusedCategory.usedOnlyInTests,
+        ),);
+      } else if (_usageTracker.isUsedOnlyLocally(declarationId)) {
+        unused.add(UnusedExport(
+          declaration: declaration,
+          exportedVia: _publicApi.getExportedVia(declarationId),
+          category: UnusedCategory.usedOnlyLocally,
         ),);
       } else if (!_usageTracker.isUsed(declarationId)) {
         unused.add(UnusedExport(

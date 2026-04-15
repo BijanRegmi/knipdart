@@ -2,8 +2,11 @@ import 'declaration.dart';
 
 /// Category of unused export
 enum UnusedCategory {
-  /// Not used anywhere
+  /// Not used anywhere (can be removed)
   unused,
+
+  /// Used within the same file but not externally (should be made private)
+  usedOnlyLocally,
 
   /// Only used in test files
   usedOnlyInTests,
@@ -37,6 +40,7 @@ class AnalysisStats {
   final int totalDeclarations;
   final int publicDeclarations;
   final int unusedExports;
+  final int usedOnlyLocally;
   final int usedOnlyInTests;
   final Duration analysisTime;
 
@@ -45,6 +49,7 @@ class AnalysisStats {
     required this.totalDeclarations,
     required this.publicDeclarations,
     required this.unusedExports,
+    required this.usedOnlyLocally,
     required this.usedOnlyInTests,
     required this.analysisTime,
   });
@@ -82,6 +87,11 @@ class AnalysisResult {
   /// Exports that are completely unused
   List<UnusedExport> get completelyUnused =>
       unusedExports.where((e) => e.category == UnusedCategory.unused).toList();
+
+  /// Exports used only within the same file (should be made private)
+  List<UnusedExport> get usedOnlyLocally => unusedExports
+      .where((e) => e.category == UnusedCategory.usedOnlyLocally)
+      .toList();
 
   /// Exports used only in tests
   List<UnusedExport> get usedOnlyInTests => unusedExports

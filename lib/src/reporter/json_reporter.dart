@@ -12,16 +12,26 @@ class JsonReporter {
 
   JsonReporter({this.projectRoot});
 
-  void report(AnalysisResult result) {
-    final output = {
-      'unusedExports': result.completelyUnused.map(_exportToJson).toList(),
-      'usedOnlyInTests': result.usedOnlyInTests.map(_exportToJson).toList(),
+  void report(
+    AnalysisResult result, {
+    bool showUnused = true,
+    bool showLocal = true,
+    bool showTest = true,
+  }) {
+    final output = <String, dynamic>{
+      if (showUnused)
+        'unusedExports': result.completelyUnused.map(_exportToJson).toList(),
+      if (showLocal)
+        'usedOnlyLocally': result.usedOnlyLocally.map(_exportToJson).toList(),
+      if (showTest)
+        'usedOnlyInTests': result.usedOnlyInTests.map(_exportToJson).toList(),
       'stats': {
         'totalFiles': result.stats.totalFiles,
         'totalDeclarations': result.stats.totalDeclarations,
         'publicExports': result.stats.publicDeclarations,
-        'unusedExports': result.stats.unusedExports,
-        'usedOnlyInTests': result.stats.usedOnlyInTests,
+        if (showUnused) 'unusedExports': result.stats.unusedExports,
+        if (showLocal) 'usedOnlyLocally': result.stats.usedOnlyLocally,
+        if (showTest) 'usedOnlyInTests': result.stats.usedOnlyInTests,
         'analysisTimeMs': result.stats.analysisTime.inMilliseconds,
       },
       'warnings': result.warnings.map((w) => w.toString()).toList(),

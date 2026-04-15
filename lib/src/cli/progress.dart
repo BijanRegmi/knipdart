@@ -277,31 +277,48 @@ class ProgressReporter {
     required int totalFiles,
     required int totalDeclarations,
     required int publicExports,
-    required int unusedExports,
-    required int usedOnlyInTests,
+    int? unusedExports,
+    int? usedOnlyLocally,
+    int? usedOnlyInTests,
     required List<UnusedExportInfo> unused,
+    required List<UnusedExportInfo> localOnly,
     required List<UnusedExportInfo> testOnly,
   }) {
     _totalStopwatch.stop();
     stdout.writeln();
 
+    // Check if there's anything to show
+    final hasUnused = unused.isNotEmpty;
+    final hasLocalOnly = localOnly.isNotEmpty;
+    final hasTestOnly = testOnly.isNotEmpty;
+
     // Results header
-    if (unusedExports == 0 && usedOnlyInTests == 0) {
+    if (!hasUnused && !hasLocalOnly && !hasTestOnly) {
       final icon = _color(Symbols.sparkles, Colors.green);
       stdout.writeln('  $icon ${_bold(_color('No unused exports found!', Colors.green))}');
     } else {
-      // Unused exports section
+      // Unused exports section (can be removed)
       if (unused.isNotEmpty) {
         final icon = _color(Symbols.cross, Colors.red);
         final title = _bold(_color('Unused Exports', Colors.red));
-        stdout.writeln('  $icon $title ${_dim('(${unused.length})')}');
+        stdout.writeln('  $icon $title ${_dim('(${unused.length})')} ${_dim('- can be removed')}');
         stdout.writeln();
         _printExportList(unused, Colors.red);
       }
 
+      // Local-only exports section (should be made private)
+      if (localOnly.isNotEmpty) {
+        if (unused.isNotEmpty) stdout.writeln();
+        final icon = _color(Symbols.info, Colors.magenta);
+        final title = _bold(_color('Used Only Locally', Colors.magenta));
+        stdout.writeln('  $icon $title ${_dim('(${localOnly.length})')} ${_dim('- make private')}');
+        stdout.writeln();
+        _printExportList(localOnly, Colors.magenta);
+      }
+
       // Test-only exports section
       if (testOnly.isNotEmpty) {
-        if (unused.isNotEmpty) stdout.writeln();
+        if (unused.isNotEmpty || localOnly.isNotEmpty) stdout.writeln();
         final icon = _color(Symbols.warning, Colors.yellow);
         final title = _bold(_color('Used Only in Tests', Colors.yellow));
         stdout.writeln('  $icon $title ${_dim('(${testOnly.length})')}');
@@ -318,6 +335,7 @@ class ProgressReporter {
       totalDeclarations: totalDeclarations,
       publicExports: publicExports,
       unusedExports: unusedExports,
+      usedOnlyLocally: usedOnlyLocally,
       usedOnlyInTests: usedOnlyInTests,
     );
   }
@@ -353,15 +371,11 @@ class ProgressReporter {
     required int totalFiles,
     required int totalDeclarations,
     required int publicExports,
-    required int unusedExports,
-    required int usedOnlyInTests,
+    int? unusedExports,
+    int? usedOnlyLocally,
+    int? usedOnlyInTests,
   }) {
     final elapsed = _formatDuration(_totalStopwatch.elapsed);
-
-    // Calculate the unused percentage
-    final unusedPercent = publicExports > 0
-        ? ((unusedExports / publicExports) * 100).toStringAsFixed(1)
-        : '0.0';
 
     stdout.writeln(_dim('  ┌─────────────────────────────────────┐'));
     stdout.writeln(_dim('  │') + _bold('           Summary                  ') + _dim('│'));
@@ -371,12 +385,21 @@ class ProgressReporter {
     _printSummaryRow('Total declarations', totalDeclarations.toString());
     _printSummaryRow('Public exports', publicExports.toString());
 
-    final unusedStr = unusedExports > 0
-        ? _color('$unusedExports ($unusedPercent%)', Colors.red)
-        : _color('0', Colors.green);
-    _printSummaryRow('Unused exports', unusedStr, raw: true);
+    if (unusedExports != null) {
+      final unusedPercent = publicExports > 0
+          ? ((unusedExports / publicExports) * 100).toStringAsFixed(1)
+          : '0.0';
+      final unusedStr = unusedExports > 0
+          ? _color('$unusedExports ($unusedPercent%)', Colors.red)
+          : _color('0', Colors.green);
+      _printSummaryRow('Unused exports', unusedStr, raw: true);
+    }
 
-    if (usedOnlyInTests > 0) {
+    if (usedOnlyLocally != null && usedOnlyLocally > 0) {
+      _printSummaryRow('Local-only', _color(usedOnlyLocally.toString(), Colors.magenta), raw: true);
+    }
+
+    if (usedOnlyInTests != null && usedOnlyInTests > 0) {
       _printSummaryRow('Test-only', _color(usedOnlyInTests.toString(), Colors.yellow), raw: true);
     }
 

@@ -45,25 +45,69 @@ class AnalyzeCommand extends Command<int> {
         'no-spinner',
         defaultsTo: false,
         help: 'Disable spinner animation',
+      )
+      ..addOption(
+        'project-root',
+        abbr: 'p',
+        help: 'Project root directory (where pubspec.yaml is located). '
+            'If not specified, scans upward from the analyze path.',
+      )
+      ..addMultiOption(
+        'show',
+        abbr: 's',
+        allowed: ['unused', 'local', 'test'],
+        help: 'Filter which types of unused exports to show. '
+            'Options: unused (completely unused), local (used only locally), '
+            'test (used only in tests). Shows all if not specified.',
       );
   }
 
   @override
   Future<int> run() async {
-    final path = argResults!.rest.isEmpty
+    // The path argument is the scope to analyze (defaults to current directory)
+    final scopePath = argResults!.rest.isEmpty
         ? Directory.current.path
         : argResults!.rest.first;
 
-    final absolutePath = p.isAbsolute(path) ? path : p.absolute(path);
+    final absoluteScopePath =
+        p.isAbsolute(scopePath) ? scopePath : p.absolute(scopePath);
 
-    if (!Directory(absolutePath).existsSync()) {
-      stderr.writeln('Error: Directory not found: $absolutePath');
+    if (!Directory(absoluteScopePath).existsSync() &&
+        !File(absoluteScopePath).existsSync()) {
+      stderr.writeln('Error: Path not found: $absoluteScopePath');
       return 1;
     }
 
-    final pubspecPath = p.join(absolutePath, 'pubspec.yaml');
+    // Project root is where pubspec.yaml lives
+    final projectRootArg = argResults!['project-root'] as String?;
+    final String projectRoot;
+
+    if (projectRootArg != null) {
+      projectRoot = p.isAbsolute(projectRootArg)
+          ? projectRootArg
+          : p.absolute(projectRootArg);
+    } else {
+      // Scan upwards from scope path to find pubspec.yaml
+      final foundRoot = _findProjectRoot(absoluteScopePath);
+      if (foundRoot == null) {
+        stderr.writeln(
+            'Error: No pubspec.yaml found in $absoluteScopePath or any parent directory',);
+        return 1;
+      }
+      projectRoot = foundRoot;
+    }
+
+    final pubspecPath = p.join(projectRoot, 'pubspec.yaml');
     if (!File(pubspecPath).existsSync()) {
-      stderr.writeln('Error: No pubspec.yaml found in $absolutePath');
+      stderr.writeln('Error: No pubspec.yaml found in $projectRoot');
+      return 1;
+    }
+
+    // Validate scope path is within project root
+    if (!p.isWithin(projectRoot, absoluteScopePath) &&
+        absoluteScopePath != projectRoot) {
+      stderr.writeln(
+          'Error: Scope path must be within project root: $absoluteScopePath',);
       return 1;
     }
 
@@ -71,30 +115,65 @@ class AnalyzeCommand extends Command<int> {
     final exclude = argResults!['exclude'] as List<String>;
     final noColor = argResults!['no-color'] as bool;
     final noSpinner = argResults!['no-spinner'] as bool;
+    final showTypes = argResults!['show'] as List<String>;
+
+    // If no types specified, show all
+    final showUnused = showTypes.isEmpty || showTypes.contains('unused');
+    final showLocal = showTypes.isEmpty || showTypes.contains('local');
+    final showTest = showTypes.isEmpty || showTypes.contains('test');
+
+    // Determine scope paths (relative to project root)
+    final scopePaths = absoluteScopePath == projectRoot
+        ? <String>[]
+        : [absoluteScopePath];
 
     // Use JSON format silently
     if (format == 'json') {
-      return _runJsonAnalysis(absolutePath, exclude);
+      return _runJsonAnalysis(
+        projectRoot,
+        exclude,
+        scopePaths,
+        showUnused: showUnused,
+        showLocal: showLocal,
+        showTest: showTest,
+      );
     }
 
     // Use fancy console output
     return _runConsoleAnalysis(
-      absolutePath,
+      projectRoot,
       exclude,
+      scopePaths,
       useColors: !noColor,
       useSpinner: !noSpinner,
+      showUnused: showUnused,
+      showLocal: showLocal,
+      showTest: showTest,
     );
   }
 
-  Future<int> _runJsonAnalysis(String absolutePath, List<String> exclude) async {
+  Future<int> _runJsonAnalysis(
+    String projectRoot,
+    List<String> exclude,
+    List<String> scopePaths, {
+    required bool showUnused,
+    required bool showLocal,
+    required bool showTest,
+  }) async {
     try {
       final analyzer = ProjectAnalyzer(
-        projectPath: absolutePath,
+        projectPath: projectRoot,
         excludePatterns: exclude,
+        scopePaths: scopePaths,
       );
 
       final result = await analyzer.analyze();
-      JsonReporter(projectRoot: absolutePath).report(result);
+      JsonReporter(projectRoot: projectRoot).report(
+        result,
+        showUnused: showUnused,
+        showLocal: showLocal,
+        showTest: showTest,
+      );
 
       return result.completelyUnused.isEmpty ? 0 : 1;
     } catch (e) {
@@ -104,19 +183,27 @@ class AnalyzeCommand extends Command<int> {
   }
 
   Future<int> _runConsoleAnalysis(
-    String absolutePath,
-    List<String> exclude, {
+    String projectRoot,
+    List<String> exclude,
+    List<String> scopePaths, {
     required bool useColors,
     required bool useSpinner,
+    required bool showUnused,
+    required bool showLocal,
+    required bool showTest,
   }) async {
     final progress = ProgressReporter(
       useColors: useColors,
       useSpinner: useSpinner,
     );
 
-    final relativePath = p.relative(absolutePath, from: Directory.current.path);
+    // Display the scope path if specified, otherwise the project root
+    final displayTarget =
+        scopePaths.isNotEmpty ? scopePaths.first : projectRoot;
+    final relativePath =
+        p.relative(displayTarget, from: Directory.current.path);
     final displayPath = relativePath.isEmpty || relativePath == '.'
-        ? p.basename(absolutePath)
+        ? p.basename(displayTarget)
         : relativePath;
 
     progress.start(displayPath);
@@ -125,8 +212,9 @@ class AnalyzeCommand extends Command<int> {
 
     try {
       final analyzer = ProjectAnalyzer(
-        projectPath: absolutePath,
+        projectPath: projectRoot,
         excludePatterns: exclude,
+        scopePaths: scopePaths,
         onProgress: (progressInfo) {
           if (progressInfo.phase != currentPhase) {
             // Complete previous phase
@@ -170,27 +258,41 @@ class AnalyzeCommand extends Command<int> {
         progress.warning(warning.toString());
       }
 
-      // Show results
+      // Show results (filtered by --show flag)
       progress.showResults(
         totalFiles: result.stats.totalFiles,
         totalDeclarations: result.stats.totalDeclarations,
         publicExports: result.stats.publicDeclarations,
-        unusedExports: result.stats.unusedExports,
-        usedOnlyInTests: result.stats.usedOnlyInTests,
-        unused: result.completelyUnused
-            .map((e) => UnusedExportInfo(
-                  filePath: p.relative(e.declaration.filePath, from: absolutePath),
-                  name: e.declaration.name,
-                  type: _typeToString(e.declaration.type),
-                ),)
-            .toList(),
-        testOnly: result.usedOnlyInTests
-            .map((e) => UnusedExportInfo(
-                  filePath: p.relative(e.declaration.filePath, from: absolutePath),
-                  name: e.declaration.name,
-                  type: _typeToString(e.declaration.type),
-                ),)
-            .toList(),
+        unusedExports: showUnused ? result.stats.unusedExports : null,
+        usedOnlyLocally: showLocal ? result.stats.usedOnlyLocally : null,
+        usedOnlyInTests: showTest ? result.stats.usedOnlyInTests : null,
+        unused: showUnused
+            ? result.completelyUnused
+                .map((e) => UnusedExportInfo(
+                      filePath: p.relative(e.declaration.filePath, from: projectRoot),
+                      name: e.declaration.name,
+                      type: _typeToString(e.declaration.type),
+                    ),)
+                .toList()
+            : [],
+        localOnly: showLocal
+            ? result.usedOnlyLocally
+                .map((e) => UnusedExportInfo(
+                      filePath: p.relative(e.declaration.filePath, from: projectRoot),
+                      name: e.declaration.name,
+                      type: _typeToString(e.declaration.type),
+                    ),)
+                .toList()
+            : [],
+        testOnly: showTest
+            ? result.usedOnlyInTests
+                .map((e) => UnusedExportInfo(
+                      filePath: p.relative(e.declaration.filePath, from: projectRoot),
+                      name: e.declaration.name,
+                      type: _typeToString(e.declaration.type),
+                    ),)
+                .toList()
+            : [],
       );
 
       stdout.writeln();
@@ -218,5 +320,26 @@ class AnalyzeCommand extends Command<int> {
       DeclarationType.extensionType => 'extension type',
       DeclarationType.mixin => 'mixin',
     };
+  }
+
+  /// Scan upwards from the given path to find the project root (containing pubspec.yaml)
+  String? _findProjectRoot(String startPath) {
+    var current = Directory(startPath).existsSync()
+        ? startPath
+        : p.dirname(startPath);
+
+    while (true) {
+      final pubspecPath = p.join(current, 'pubspec.yaml');
+      if (File(pubspecPath).existsSync()) {
+        return current;
+      }
+
+      final parent = p.dirname(current);
+      if (parent == current) {
+        // Reached filesystem root
+        return null;
+      }
+      current = parent;
+    }
   }
 }

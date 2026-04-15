@@ -88,4 +88,59 @@ void main() {
       expect(unusedNames, isNot(contains('helper1')));
     });
   });
+
+  group('Local Usage Project Analysis', () {
+    late ProjectAnalyzer analyzer;
+    late AnalysisResult result;
+
+    setUpAll(() async {
+      final fixturePath = p.join(
+        p.current,
+        'test',
+        'fixtures',
+        'local_usage_project',
+      );
+      analyzer = ProjectAnalyzer(projectPath: fixturePath);
+      result = await analyzer.analyze();
+    });
+
+    test('identifies exports used only locally', () {
+      final localOnlyNames = result.usedOnlyLocally
+          .map((e) => e.declaration.name)
+          .toSet();
+
+      // Foo is used only within the same file (by fooFromJson)
+      // Baz is used only within the same file (by Foo.sayHello)
+      expect(localOnlyNames, contains('Foo'));
+      expect(localOnlyNames, contains('Baz'));
+    });
+
+    test('identifies completely unused exports', () {
+      final unusedNames = result.completelyUnused
+          .map((e) => e.declaration.name)
+          .toSet();
+
+      // Bar and Qux are not used anywhere
+      expect(unusedNames, contains('Bar'));
+      expect(unusedNames, contains('Qux'));
+    });
+
+    test('does not report externally used exports', () {
+      final unusedNames = result.completelyUnused
+          .map((e) => e.declaration.name)
+          .toSet();
+      final localOnlyNames = result.usedOnlyLocally
+          .map((e) => e.declaration.name)
+          .toSet();
+
+      // fooFromJson is used in bin/main.dart
+      expect(unusedNames, isNot(contains('fooFromJson')));
+      expect(localOnlyNames, isNot(contains('fooFromJson')));
+    });
+
+    test('provides correct statistics', () {
+      expect(result.stats.unusedExports, equals(2)); // Bar, Qux
+      expect(result.stats.usedOnlyLocally, equals(2)); // Foo, Baz
+    });
+  });
 }

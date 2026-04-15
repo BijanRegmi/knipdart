@@ -69,6 +69,9 @@ knipdart analyze --exclude="**/*.g.dart" --exclude="**/*.freezed.dart"
 
 # Disable colors/spinner (for CI)
 knipdart analyze --no-color --no-spinner
+
+# Analyze specific subdirectory (scoped analysis)
+knipdart analyze lib/features/auth --project-root=.
 ```
 
 ## Example Output
